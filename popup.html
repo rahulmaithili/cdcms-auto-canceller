@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CDCMS Auto-Canceller</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-area">
+        <img src="logo.png" alt="Logo" class="logo-img" id="popupLogoImg" style="background: white; padding: 1px;">
+        <div class="logo-text">
+          <span class="logo-brand" id="popupBrandName">MR. RAHUL SCRIPTS</span>
+          <h1>CDCMS Auto-Canceller</h1>
+          <p>HP Gas Booking Cancellation Tool</p>
+        </div>
+      </div>
+      <div class="badge active-badge" id="statusBadge">Idle</div>
+    </header>
+
+    <!-- Main Content (Locked until license is verified) -->
+    <main class="app-body" id="licensedContent" style="display: none;">
+      
+      <!-- Tool Mode Panel -->
+      <section class="panel mode-panel">
+        <div class="section-title">
+          <h3>Select Tool Mode</h3>
+        </div>
+        <div class="mode-selector">
+          <button class="mode-btn active" id="modeCancelBtn" data-mode="cancel">Cancellation</button>
+          <button class="mode-btn" id="modeConfirmBtn" data-mode="confirm">Delivery Confirm</button>
+        </div>
+      </section>
+
+      <!-- Input Panel -->
+      <section class="panel input-panel" id="configPanel">
+        <div class="section-title">
+          <h3>1. Load Bookings</h3>
+        </div>
+
+        <!-- Tab Selector -->
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="excelTab">Excel / CSV File</button>
+          <button class="tab-btn" data-tab="manualTab">Paste Numbers</button>
+        </div>
+
+        <!-- Excel File Upload Tab -->
+        <div class="tab-content active" id="excelTab">
+          <div class="file-dropzone" id="dropzone">
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--color-primary); margin-bottom: 8px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            <p class="dropzone-text">Drag & drop your Excel/CSV file here</p>
+            <p class="dropzone-subtext">Supports .xlsx, .xls, .csv</p>
+            <button class="btn btn-secondary" id="browseBtn">Choose File</button>
+            <input type="file" id="fileInput" accept=".xlsx, .xls, .csv" style="display: none;">
+          </div>
+          <div class="file-info" id="fileInfoPanel" style="display: none;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--color-primary); margin-right: 10px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+            <div class="file-details">
+              <p class="file-name" id="fileName">bookings.xlsx</p>
+              <p class="file-size" id="fileCount">0 bookings found</p>
+            </div>
+            <button class="remove-file-btn" id="removeFileBtn">×</button>
+          </div>
+        </div>
+
+        <!-- Manual Input Tab -->
+        <div class="tab-content" id="manualTab">
+          <div class="textarea-wrapper">
+            <textarea id="manualNumbers" placeholder="Enter Consumer Numbers here...&#10;One number per line (e.g. 619507)"></textarea>
+          </div>
+        </div>
+      </section>
+
+      <!-- Settings Panel -->
+      <section class="panel settings-panel">
+        <div class="section-title">
+          <h3 id="settingsTitle">2. Cancellation Options</h3>
+        </div>
+        
+        <!-- Cancellation Mode Settings -->
+        <div class="settings-grid" id="cancelSettings">
+          <div class="form-group">
+            <label for="cancelReason">Cancellation Reason</label>
+            <select id="cancelReason" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-light); border-radius: 6px; padding: 6px 10px; font-family: var(--font-family); font-size: 12px; color: var(--text-primary); outline: none;">
+              <option value="House was locked. (Tried Three Times)">House was locked. (Tried Three Times)</option>
+              <option value="Address was wrong">Address was wrong</option>
+              <option value="Not staying">Not staying</option>
+              <option value="Out of station">Out of station</option>
+              <option value="No money">No money</option>
+              <option value="Still gas">Still gas</option>
+              <option value="Not booked">Not booked</option>
+              <option value="Return by customer">Return by customer</option>
+              <option value="No empty cylinder">No empty cylinder</option>
+              <option value="Other company's cylinder">Other company's cylinder</option>
+              <option value="Other Reason">Other Reason</option>
+              <option value="Attempted 2 times for PTD Consumer">Attempted 2 times for PTD Consumer</option>
+              <option value="Mechanic Service Required">Mechanic Service Required</option>
+              <option value="DGCC Book not available">DGCC Book not available</option>
+              <option value="Installation not safe">Installation not safe</option>
+              <option value="Quota Reversal Process">Quota Reversal Process</option>
+              <option value="Modified DBTL Activation">Modified DBTL Activation</option>
+              <option value="CTC to Non-CTC Updation">CTC to Non-CTC Updation</option>
+              <option value="Non-CTC to CTC Updation">Non-CTC to CTC Updation</option>
+              <option value="CUSTOM">-- Custom Reason Keyword --</option>
+            </select>
+            <small class="help-text">Select cancellation reason</small>
+          </div>
+          
+          <div class="form-group">
+            <label for="delaySeconds">Delay: <span id="delayVal">2</span>s</label>
+            <div class="slider-wrapper">
+              <input type="range" id="delaySeconds" min="1" max="10" value="2">
+            </div>
+            <small class="help-text">Delay between cancellations</small>
+          </div>
+
+          <div class="form-group" id="customCancelReasonGroup" style="display: none; grid-column: span 2; margin-top: 4px;">
+            <label for="customCancelReason">Custom Reason Keyword</label>
+            <input type="text" id="customCancelReason" placeholder="Enter reason keyword exactly">
+            <small class="help-text">Matches reason in website dropdown</small>
+          </div>
+        </div>
+
+        <!-- Delivery Confirmation Mode Settings -->
+        <div class="settings-grid" id="deliverySettings" style="display: none;">
+          <div class="form-group">
+            <label for="deliveryMan">Delivery Man</label>
+            <select id="deliveryMan" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-light); border-radius: 6px; padding: 6px 10px; font-family: var(--font-family); font-size: 12px; color: var(--text-primary); outline: none;">
+              <option value="Bajrangi Panjiyar">Bajrangi Panjiyar</option>
+              <option value="BECHAN">BECHAN</option>
+              <option value="BHOGENDRA">BHOGENDRA</option>
+              <option value="delevery boy">delevery boy</option>
+              <option value="DELEVRY BOY">DELEVRY BOY</option>
+              <option value="DELIVERY BOY">DELIVERY BOY</option>
+              <option value="DINESH">DINESH</option>
+              <option value="Faiyaz">Faiyaz</option>
+              <option value="Genalal Yadav">Genalal Yadav</option>
+              <option value="MANTUN">MANTUN</option>
+              <option value="Md Razza">Md Razza</option>
+              <option value="SANJAY">SANJAY</option>
+              <option value="Saroj kumar Ray">Saroj kumar Ray</option>
+              <option value="Sujeet Kumar">Sujeet Kumar</option>
+              <option value="SUVASH KUMAR">SUVASH KUMAR</option>
+              <option value="CUSTOM">-- Custom / Manual Name --</option>
+            </select>
+            <small class="help-text">Select delivery man name</small>
+          </div>
+          
+          <div class="form-group">
+            <label for="delaySecondsConfirm">Delay: <span id="delayValConfirm">2</span>s</label>
+            <div class="slider-wrapper">
+              <input type="range" id="delaySecondsConfirm" min="1" max="10" value="2">
+            </div>
+            <small class="help-text">Delay between fetches/rows</small>
+          </div>
+
+          <div class="form-group" id="customDeliveryManGroup" style="display: none; grid-column: span 2; margin-top: 4px;">
+            <label for="customDeliveryMan">Custom Delivery Man Name</label>
+            <input type="text" id="customDeliveryMan" placeholder="Enter delivery man name exactly">
+            <small class="help-text">Must match option in page dropdown</small>
+          </div>
+        </div>
+      </section>
+
+      <!-- Action Panel -->
+      <section class="action-panel">
+        <div class="control-buttons">
+          <button class="btn btn-primary" id="startBtn" disabled>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            <span id="startBtnText">Start Cancelling</span>
+          </button>
+          <button class="btn btn-warning" id="pauseBtn" style="display: none;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+            Pause
+          </button>
+          <button class="btn btn-danger" id="stopBtn" disabled>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><rect x="4" y="4" width="16" height="16"></rect></svg>
+            Stop / Reset
+          </button>
+        </div>
+      </section>
+
+      <!-- Progress Monitor -->
+      <section class="panel monitor-panel" id="monitorPanel" style="display: none;">
+        <div class="progress-section">
+          <div class="progress-text-row">
+            <span class="progress-status" id="progressStatusText">Running automation...</span>
+            <span class="progress-percent" id="progressPercentText">0%</span>
+          </div>
+          <div class="progress-bar-container">
+            <div class="progress-bar-fill" id="progressBarFill" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card total-card">
+            <span class="stat-number" id="statTotal">0</span>
+            <span class="stat-label">Total</span>
+          </div>
+          <div class="stat-card success-card">
+            <span class="stat-number" id="statSuccess">0</span>
+            <span class="stat-label">Success</span>
+          </div>
+          <div class="stat-card error-card">
+            <span class="stat-number" id="statError">0</span>
+            <span class="stat-label">Failed</span>
+          </div>
+          <div class="stat-card pending-card">
+            <span class="stat-number" id="statPending">0</span>
+            <span class="stat-label">Pending</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Logs Panel -->
+      <section class="panel logs-panel" id="logsPanel" style="display: none;">
+        <div class="logs-header">
+          <h3>3. Process Logs</h3>
+          <button class="btn btn-secondary btn-sm" id="exportLogsBtn" style="display: inline-flex; align-items: center; gap: 4px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>
+            Export Report
+          </button>
+        </div>
+        <div class="logs-table-wrapper">
+          <table class="logs-table">
+            <thead>
+              <tr>
+                <th>Consumer No</th>
+                <th>Status</th>
+                <th>Result Detail</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody id="logsTableBody">
+              <!-- Logs dynamic generation -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- License Lock Screen -->
+    <main class="app-body" id="licenseLockScreen" style="display: block;">
+      <section class="panel">
+        <div class="section-title">
+          <h3>License Activation Required</h3>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 14px; margin-top: 10px;">
+          <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
+            To use this tool, please enter a valid license key. You can purchase or renew keys from the administrator.
+          </p>
+
+          <div class="form-group" style="display: flex; flex-direction: column; gap: 4px;">
+            <label for="inputLicenseKey" style="font-size: 11px; font-weight: 600; color: var(--text-secondary);">License Key</label>
+            <input type="text" id="inputLicenseKey" placeholder="RAHUL-XXXX-XXXX-XXXX" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-light); border-radius: 6px; padding: 10px; font-family: monospace; font-size: 13px; color: var(--text-primary); outline: none; transition: border-color 0.2s ease;">
+          </div>
+
+          <div style="font-size: 10px; color: var(--text-secondary); background: rgba(255, 255, 255, 0.03); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-light);">
+            <strong>Your Device ID:</strong> <span id="displayDeviceId" style="font-family: monospace; user-select: all; color: var(--color-primary);">Generating...</span>
+            <br>
+            <span style="font-size: 8px; color: var(--text-secondary); font-style: italic;">*Share this Device ID with the developer if requested.</span>
+          </div>
+
+          <div style="display: flex; gap: 10px;">
+            <a href="https://licensescript.netlify.app/" target="_blank" class="btn btn-secondary" style="flex: 1; padding: 12px; font-size: 13px; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+              Buy / Renew
+            </a>
+            <button class="btn btn-primary" id="btnActivateLicense" style="flex: 1.5; padding: 12px; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path></svg>
+              Verify & Activate
+            </button>
+          </div>
+
+          <div id="licenseErrorMsg" style="display: none; padding: 10px; background: rgba(244, 63, 94, 0.15); border: 1px solid var(--color-danger); border-radius: 6px; color: var(--color-danger); font-size: 11px; text-align: center;">
+            Invalid license key.
+          </div>
+        </div>
+      </section>
+    </main>
+    
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p id="licenseExpiryInfo" style="margin-bottom: 6px; color: var(--color-success); font-weight: 500; display: none; font-size: 9px;"></p>
+      <p id="popupFooter">© 2026 Mr.Rahul Scripts | its.rahul@zohomail.com | +91 7564948617</p>
+    </footer>
+  </div>
+
+  <!-- SheetJS Library for parsing Excel local files -->
+  <script src="xlsx.full.min.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

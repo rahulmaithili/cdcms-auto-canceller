@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "CDCMS Auto-Canceller",
+  "version": "1.0",
+  "description": "Automated cash memo cancellation helper for HP Gas CDCMS",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "*://hpgasweb.hpcl.co.in/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "logo.png"
+  },
+  "icons": {
+    "16": "logo.png",
+    "48": "logo.png",
+    "128": "logo.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://hpgasweb.hpcl.co.in/DCMSCentralizationApp/Views/OrderFulfillment/CancelCashMemo/CashMemoCancellation.aspx*",
+        "*://hpgasweb.hpcl.co.in/DCMSCentralizationApp/Views/OrderFulfillment/Punching/DeliveryConfirmation.aspx*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "inject.js",
+        "popup.html",
+        "popup.css",
+        "popup.js",
+        "logo.png",
+        "xlsx.full.min.js"
+      ],
+      "matches": ["*://hpgasweb.hpcl.co.in/*"]
+    }
+  ]
+}
