@@ -346,6 +346,20 @@ function getNumbersQueue() {
 
 // Start the automation loop
 function startAutomation() {
+  // High-security: a live license must be stored before any run starts.
+  // (Content-script ticks enforce this again every second, so a run can
+  // never proceed on a revoked/expired license even if this check is raced.)
+  chrome.storage.local.get(['cdcms_license'], (result) => {
+    const lic = result.cdcms_license;
+    if (!lic || !lic.active || new Date(lic.expires_at) <= new Date()) {
+      showLockedUI();
+      return;
+    }
+    startAutomationLicensed();
+  });
+}
+
+function startAutomationLicensed() {
   const list = getNumbersQueue();
   if (list.length === 0) {
     alert("Please load or enter valid consumer numbers first!");
@@ -724,7 +738,9 @@ async function initializeLicensing() {
     if (!license || !license.active) {
       showLockedUI();
     } else {
-      const cacheDuration = 12 * 60 * 60 * 1000; // 12 hours local cache
+      // High-security: cached trust lasts 1 hour, not 12 — a revoked key
+      // stops being usable within ~1h of revocation on next popup open.
+      const cacheDuration = 1 * 60 * 60 * 1000; // 1 hour local cache
       const isCacheValid = (Date.now() - license.lastChecked) < cacheDuration;
       
       if (isCacheValid) {
@@ -747,7 +763,10 @@ async function initializeLicensing() {
             showLicensedUI(res.expires_at);
           });
         } else if (res && res.networkError) {
-          if (new Date(license.expires_at) > new Date()) {
+          // Bounded offline grace: network failures keep the tool usable
+          // only within 24h of the last successful verification.
+          const OFFLINE_GRACE_MS = 24 * 60 * 60 * 1000;
+          if (new Date(license.expires_at) > new Date() && (Date.now() - license.lastChecked) <= OFFLINE_GRACE_MS) {
             showLicensedUI(license.expires_at);
           } else {
             lockLicenseLocal();

@@ -25,6 +25,52 @@ function startPolling() {
   pollInterval = setInterval(checkAndRunAutomation, 1000);
 }
 
+let lastContentVerifyAt = 0;
+const CONTENT_RECHECK_MS = 30 * 60 * 1000;
+
+// High-security: the popup only re-verifies when opened, so a run left
+// going for hours would otherwise never learn of a revocation. The portal
+// page itself re-verifies every 30 minutes; a server invalid verdict
+// deactivates the stored license (the 1s tick force-stops the run within
+// a second), while network errors keep the bounded 24h offline grace.
+async function reverifyContentLicense() {
+  try {
+    const stored = await new Promise(r => chrome.storage.local.get(['cdcms_license', 'cdcms_device_id'], r));
+    const lic = stored.cdcms_license;
+    if (!lic || !lic.key || !lic.active) return;
+    let data = null;
+    let fetchFailed = false;
+    try {
+      const res = await fetch('https://licensescript.netlify.app/api/verify-license', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: lic.key, hwid: stored.cdcms_device_id || '', deviceName: 'Auto-Canceller' })
+      });
+      if (!res.ok) {
+        fetchFailed = true;
+      } else {
+        data = await res.json().catch(() => ({}));
+      }
+    } catch (e) {
+      fetchFailed = true;
+    }
+    if (fetchFailed) {
+      // Server unreachable: deactivate only if the last successful
+      // verification is over 24h old (bounded offline grace).
+      if (lic.lastChecked && (Date.now() - lic.lastChecked) > 24 * 60 * 60 * 1000) {
+        chrome.storage.local.set({ cdcms_license: { ...lic, active: false } });
+      }
+      return;
+    }
+    if (data.valid === true || data.status === 'active' || data.status === 'grace') {
+      chrome.storage.local.set({ cdcms_license: { ...lic, expires_at: data.expires_at || lic.expires_at, lastChecked: Date.now() } });
+    } else {
+      // Server verdict (invalid/expired/revoked/locked): lock immediately.
+      chrome.storage.local.set({ cdcms_license: { ...lic, active: false } });
+    }
+  } catch (e) { /* never break the automation tick on a verify error */ }
+}
+
 // Helper to check if ASP.NET UpdateProgress is active (page is loading)
 function isPageLoading() {
   const loaders = [
@@ -60,6 +106,12 @@ async function checkAndRunAutomation() {
     
     if (!isLicensed) {
       return; // Do not execute ticks if unlicensed
+    }
+
+    // Periodic server re-verification during runs (see reverifyContentLicense).
+    if (Date.now() - lastContentVerifyAt > CONTENT_RECHECK_MS) {
+      lastContentVerifyAt = Date.now();
+      reverifyContentLicense();
     }
 
     if (!state || !state.active || state.paused) {
