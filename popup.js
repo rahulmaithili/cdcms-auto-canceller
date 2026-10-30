@@ -1,8 +1,11 @@
 // CDCMS Auto-Canceller Popup Logic
 
-// Supabase Connection Configuration (Update these with your project details)
-const SUPABASE_URL = "https://your-supabase-project.supabase.co";
-const SUPABASE_ANON_KEY = "your-supabase-anon-key";
+// LicenseWala license verification (single source of truth).
+// Keys are verified ONLY against the LicenseWala server below. There is
+// no offline, sandbox, or developer fallback of any kind.
+const LICENSE_VERIFY_URL = "https://licensescript.netlify.app/api/verify-license";
+const LICENSE_RENEW_URL = "https://licensescript.netlify.app/";
+const LICENSE_VERIFY_TIMEOUT_MS = 12000;
 
 // State Variables
 let loadedNumbersList = [];
@@ -588,8 +591,18 @@ function renderLogs(logs) {
     return;
   }
 
-  // Show latest logs first
-  const displayLogs = [...logs].reverse();
+  // Show latest logs first, capped for popup responsiveness. The full
+  // log list stays in storage, so Export Report still exports everything.
+  const displayLogs = [...logs].reverse().slice(0, 200);
+  if (logs.length > 200) {
+    const note = document.createElement('tr');
+    const noteTd = document.createElement('td');
+    noteTd.colSpan = 4;
+    noteTd.style.textAlign = 'center';
+    noteTd.innerText = `Showing latest 200 of ${logs.length} logs. Export Report contains all logs.`;
+    note.appendChild(noteTd);
+    logsTableBody.appendChild(note);
+  }
   
   displayLogs.forEach(log => {
     const tr = document.createElement('tr');
@@ -680,13 +693,14 @@ async function initializeLicensing() {
         return;
       }
       
+      const originalBtnHtml = btnActivate.innerHTML;
       btnActivate.disabled = true;
       btnActivate.innerText = "Verifying Key...";
-      
+
       const res = await remoteVerifyLicense(key, deviceId);
-      
+
       btnActivate.disabled = false;
-      btnActivate.innerText = "🔑 Verify & Activate";
+      btnActivate.innerHTML = originalBtnHtml;
       
       if (res && res.valid) {
         const licenseData = {
@@ -720,7 +734,11 @@ async function initializeLicensing() {
           showLicensedUI(license.expires_at);
         }
       } else {
-        // Re-verify online to check if admin suspended/expired key
+        // Re-verify online to check if admin suspended/expired key.
+        // A network error must NOT lock a legitimate user out: keep the
+        // cached license visible (without refreshing lastChecked, so the
+        // next popup open retries verification). Only a server verdict
+        // of invalid/expired locks the tool.
         const res = await remoteVerifyLicense(license.key, deviceId);
         if (res && res.valid) {
           license.lastChecked = Date.now();
@@ -728,6 +746,12 @@ async function initializeLicensing() {
           chrome.storage.local.set({ cdcms_license: license }, () => {
             showLicensedUI(res.expires_at);
           });
+        } else if (res && res.networkError) {
+          if (new Date(license.expires_at) > new Date()) {
+            showLicensedUI(license.expires_at);
+          } else {
+            lockLicenseLocal();
+          }
         } else {
           lockLicenseLocal();
           showLicenseError(res ? res.message : "License session expired.");
@@ -756,59 +780,69 @@ function getOrCreateDeviceId() {
 }
 
 async function remoteVerifyLicense(key, deviceId) {
-  if (SUPABASE_URL.includes("your-supabase-project")) {
-    // Attempt local dev server verification first
-    try {
-      const response = await fetch('http://localhost:8888/api/verify-license', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          p_license_key: key,
-          p_device_id: deviceId,
-          p_tool_name: 'HP GAS TOOL'
-        })
-      });
-      if (response.ok) {
-        return await response.json();
-      }
-    } catch (e) {
-      console.log("Local Netlify dev server verify offline. Falling back to sandbox bypass.", e);
-    }
+  const cleanKey = (key || '').trim().toUpperCase();
+  if (!cleanKey) {
+    return { valid: false, message: 'Please enter a license key.' };
+  }
 
-    // Return mock success if Supabase credentials aren't set up yet, to prevent locking out developer
-    return { 
-      valid: true, 
-      expires_at: new Date(Date.now() + 365*24*60*60*1000).toISOString(), 
-      message: "Supabase default sandbox mode." 
+  // Same request shape as the sibling LicenseWala-integrated tools:
+  // key + device id, verified server-side. No activation happens unless
+  // the server itself returns an active/grace verdict below.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), LICENSE_VERIFY_TIMEOUT_MS);
+
+  let response;
+  try {
+    response = await fetch(LICENSE_VERIFY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: cleanKey,
+        hwid: deviceId,
+        deviceName: 'CDCMS Auto-Canceller'
+      }),
+      signal: controller.signal
+    });
+  } catch (err) {
+    clearTimeout(timeoutId);
+    console.error('LicenseWala verification network error:', err);
+    return { valid: false, networkError: true, message: 'Could not connect to LicenseWala server. Please check your internet connection and try again.' };
+  }
+  clearTimeout(timeoutId);
+
+  let result = {};
+  try {
+    result = await response.json();
+  } catch (e) {
+    result = {};
+  }
+
+  const isActive = result.valid === true || result.status === 'active' || result.status === 'grace';
+  if (isActive) {
+    const expiresAt = result.expires_at || result.expiry_date || result.trial_ends_at || null;
+    const daysLeft = typeof result.days_left === 'number' ? result.days_left : null;
+    const computedExpiry = expiresAt || (daysLeft !== null ? new Date(Date.now() + daysLeft * 24 * 60 * 60 * 1000).toISOString() : null);
+    if (!computedExpiry) {
+      return { valid: false, message: 'License server response is missing an expiry date. Please contact LicenseWala support.' };
+    }
+    return {
+      valid: true,
+      expires_at: computedExpiry,
+      status: result.status || 'active',
+      trial: result.trial === true || cleanKey.startsWith('LW-TRIAL-'),
+      message: result.message || 'License active!'
     };
   }
-  
-  const url = `${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/rpc/verify_license_key`;
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        p_license_key: key,
-        p_device_id: deviceId,
-        p_tool_name: 'HP GAS TOOL'
-      })
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Server returned error: ${response.status}`);
-    }
-    return await response.json();
-  } catch (err) {
-    console.error("License verification failed:", err);
-    return { valid: false, message: "Database connection failed. Please check internet connection." };
+
+  const reason = result.status || 'invalid';
+  let message = result.message || '';
+  if (!message) {
+    if (reason === 'expired') message = 'License key has expired. Please renew on LicenseWala.';
+    else if (reason === 'device_mismatch') message = 'This key is already bound to another device. Please reset the device binding on your LicenseWala account.';
+    else if (reason === 'rate_limited') message = 'Too many verification attempts. Please wait a minute and try again.';
+    else message = 'Invalid license key. Please check the key and try again.';
   }
+  return { valid: false, status: reason, message: message };
 }
 
 function showLockedUI() {
@@ -827,7 +861,7 @@ function showLicensedUI(expiryDateStr) {
   const expInfo = document.getElementById('licenseExpiryInfo');
   if (expInfo && expiryDateStr) {
     const expDate = new Date(expiryDateStr);
-    expInfo.innerHTML = `License Active - Expiry: ${expDate.toLocaleDateString()} (<a href="https://licensescript.netlify.app/" target="_blank" style="color: inherit; text-decoration: underline;">Renew</a>)`;
+    expInfo.innerHTML = `License Active - Expiry: ${expDate.toLocaleDateString()} (<a href="${LICENSE_RENEW_URL}" target="_blank" style="color: inherit; text-decoration: underline;">Renew</a>)`;
     expInfo.style.display = 'block';
   }
 }
@@ -846,42 +880,17 @@ function showLicenseError(msg) {
   }
 }
 
-// Fetch dynamic SaaS configuration elements
+// Portal details shown in the popup header/footer.
+// Static on purpose: no remote config fetch, so a failed or slow network
+// can never change branding or interfere with activation.
 async function fetchDynamicConfig() {
-  let config = {
+  const config = {
     company_name: 'Mr. Rahul Scripts',
     support_email: 'its.rahul@zohomail.com',
     support_phone: '+91 7564948617',
     company_logo: ''
   };
 
-  try {
-    // Attempt local API first
-    const res = await fetch('http://localhost:8888/api/config');
-    if (res.ok) {
-      config = await res.json();
-    } else if (typeof SUPABASE_URL !== 'undefined' && SUPABASE_URL && !SUPABASE_URL.includes("your-supabase-project")) {
-      // Attempt Supabase fetch
-      const cleanUrl = SUPABASE_URL.replace(/\/$/, '');
-      const response = await fetch(`${cleanUrl}/rest/v1/settings?id=eq.default`, {
-        method: 'GET',
-        headers: {
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data.length > 0) {
-          config = data[0];
-        }
-      }
-    }
-  } catch (err) {
-    console.log("Could not load dynamic configuration, using defaults.", err);
-  }
-
-  // Update popup UI elements
   const logoImg = document.getElementById('popupLogoImg');
   const brandName = document.getElementById('popupBrandName');
   const footer = document.getElementById('popupFooter');

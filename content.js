@@ -319,14 +319,16 @@ async function executeStep(state, currentItem) {
           logDebug(`Selected reason value: ${selectedValue}`);
           await sleep(500); // let page scripts process the selection
         } else {
-          throw new Error('No cancellation reasons found in dropdown.');
+          // Do not throw: the poll loop would retry this item forever.
+          await handleResultCaptured(state, currentItem, 'No cancellation reasons found in dropdown.');
+          return;
         }
       }
       
       // Click Cancel Cash Memo
       if (btnCancel) {
         forceEnable(btnCancel);
-        
+
         state.step = 'CANCELLING';
         state.statusText = `Cancelling booking for ${consumerNo}...`;
         state.stepStartTime = Date.now();
@@ -334,6 +336,10 @@ async function executeStep(state, currentItem) {
           logDebug('Clicking Cancel Cash Memo...');
           btnCancel.click();
         });
+      } else {
+        // Details loaded but no Cancel button: without this branch the
+        // tick retried the same item forever. Fail this one item only.
+        await handleResultCaptured(state, currentItem, 'Cancel button not found on page.');
       }
     } else {
       // Check for fetch timeout (e.g., after 15 seconds)
@@ -372,8 +378,37 @@ async function processDeliveryAutomation(state) {
   }
   
   const currentItem = list[currentIndex];
-  
+
   if (state.step === 'CLEARING' || state.step === 'WAITING_DELAY') {
+    return;
+  }
+
+  // Defensive guard: queue exhausted but a batch is still open (e.g. a
+  // reload landed between Add Row and Submit). Never fill an undefined
+  // item into the form; submit the open batch or finish cleanly.
+  if (!currentItem) {
+    if ((state.batchCount || 0) > 0) {
+      const btnSubmit = findSubmitButton();
+      if (btnSubmit) {
+        forceEnable(btnSubmit);
+        state.step = 'SUBMITTING';
+        state.statusText = `Submitting batch of ${state.batchCount} confirmations...`;
+        state.stepStartTime = Date.now();
+        chrome.storage.local.set({ cdcms_automation_state: state }, () => {
+          btnSubmit.click();
+        });
+      } else {
+        state.batchCount = 0;
+        state.batchStartIndex = null;
+        state.active = false;
+        state.statusText = 'Completed with errors: batch submit button not found.';
+        chrome.storage.local.set({ cdcms_automation_state: state });
+      }
+    } else {
+      state.active = false;
+      state.statusText = 'Completed successfully!';
+      chrome.storage.local.set({ cdcms_automation_state: state });
+    }
     return;
   }
   
@@ -469,21 +504,75 @@ async function handleDeliveryResultCaptured(state, item, msg) {
     });
   } 
   
+  else if (state.step === 'ADDING_ROW') {
+    // A row-add that failed (validation dialog, or the 20s Add Row
+    // timeout) must NOT stall the run: the old code had no branch for
+    // this step, so the same item was retried forever. Log it as one
+    // failed item and move on; the row never entered the batch grid,
+    // so batchCount is intentionally left unchanged.
+    state.logs.push({
+      consumerNo: consumerNo,
+      status: 'Error',
+      message: msg,
+      timestamp: new Date().toLocaleTimeString()
+    });
+
+    state.currentIndex++;
+    state.step = 'INIT';
+    state.statusText = `Error adding ${consumerNo}. Moving to next...`;
+    chrome.storage.local.set({ cdcms_automation_state: state });
+  }
+
   else if (state.step === 'SUBMITTING') {
     // Batch submission result
     const status = (lowerMsg.includes('success') || lowerMsg.includes('confirm') || lowerMsg.includes('done') || lowerMsg.includes('ok') || lowerMsg.includes('save')) ? 'Success' : 'Error';
-    
+
     state.logs.push({
       consumerNo: 'BATCH SUBMIT',
       status: status,
       message: msg,
       timestamp: new Date().toLocaleTimeString()
     });
-    
-    state.batchCount = 0;
-    state.step = 'CLEARING';
-    state.statusText = `Batch submitted. Reloading page...`;
-    
+
+    const batchStart = (typeof state.batchStartIndex === 'number') ? state.batchStartIndex : null;
+
+    if (status === 'Success') {
+      state.batchCount = 0;
+      state.batchStartIndex = null;
+      state.batchSubmitAttempts = 0;
+      state.step = 'CLEARING';
+      state.statusText = `Batch submitted. Reloading page...`;
+    } else if (batchStart !== null && (state.batchSubmitAttempts || 0) < 1) {
+      // First failed submit: the batch was never confirmed saved, but
+      // currentIndex already moved past it. Rewind once and retry the
+      // same batch after a reload (which clears the page grid).
+      state.batchSubmitAttempts = (state.batchSubmitAttempts || 0) + 1;
+      state.currentIndex = batchStart;
+      state.batchCount = 0;
+      state.batchStartIndex = null;
+      state.step = 'CLEARING';
+      state.statusText = `Batch submit failed. Retrying batch...`;
+    } else {
+      // Second failed submit: do not loop forever. Mark every item in
+      // the batch as failed so nothing is silently skipped, then move on.
+      if (batchStart !== null) {
+        for (let i = batchStart; i < state.currentIndex && i < state.list.length; i++) {
+          const skipped = state.list[i];
+          state.logs.push({
+            consumerNo: (skipped && skipped.consumerNo) || skipped,
+            status: 'Error',
+            message: 'Batch submit failed twice - skipped',
+            timestamp: new Date().toLocaleTimeString()
+          });
+        }
+      }
+      state.batchCount = 0;
+      state.batchStartIndex = null;
+      state.batchSubmitAttempts = 0;
+      state.step = 'CLEARING';
+      state.statusText = `Batch submit failed twice. Skipping batch...`;
+    }
+
     chrome.storage.local.set({ cdcms_automation_state: state }, async () => {
       await sleep(1500);
       state.step = 'INIT';
@@ -610,6 +699,11 @@ async function executeDeliveryStep(state, currentItem) {
         timestamp: new Date().toLocaleTimeString()
       });
       
+      if ((state.batchCount || 0) === 0) {
+        // First row of a new batch: remember where it started so a
+        // failed submit can rewind to it instead of losing the batch.
+        state.batchStartIndex = state.currentIndex;
+      }
       state.currentIndex++;
       state.batchCount = (state.batchCount || 0) + 1;
       
@@ -639,11 +733,17 @@ async function executeDeliveryStep(state, currentItem) {
           chrome.storage.local.set({ cdcms_automation_state: state });
         }
       } else {
-        state.step = 'INIT';
+        // Park in WAITING_DELAY for the configured delay. The old code
+        // set INIT immediately and slept inside the save callback, so
+        // the 1s poll tick started the next item before the delay had
+        // elapsed. WAITING_DELAY is already honoured by the poll loop.
+        state.step = 'WAITING_DELAY';
         state.statusText = `Added ${state.batchCount}/20. Moving to next...`;
         chrome.storage.local.set({ cdcms_automation_state: state }, async () => {
           const delayMs = (state.delay || 2) * 1000;
           await sleep(delayMs);
+          state.step = 'INIT';
+          chrome.storage.local.set({ cdcms_automation_state: state });
         });
       }
     } else if (elapsed > 20000) {
@@ -760,7 +860,14 @@ function injectFloatingWidget() {
   
   const title = document.createElement('span');
   title.innerText = '⚡ CDCMS Auto-Canceller Tool';
-  
+  Object.assign(title.style, {
+    flex: '1',
+    minWidth: '0',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap'
+  });
+
   const minBtn = document.createElement('button');
   minBtn.innerText = '▼ Minimize';
   Object.assign(minBtn.style, {
@@ -770,7 +877,8 @@ function injectFloatingWidget() {
     cursor: 'pointer',
     fontSize: '12px',
     outline: 'none',
-    fontWeight: 'bold'
+    fontWeight: 'bold',
+    flexShrink: '0'
   });
 
   header.appendChild(title);
@@ -782,30 +890,40 @@ function injectFloatingWidget() {
   Object.assign(iframe.style, {
     width: '100%',
     flex: '1',
+    minHeight: '0',
     border: 'none',
     backgroundColor: '#0f172a'
   });
   widget.appendChild(iframe);
 
   let isMinimized = sessionStorage.getItem('cdcms_widget_minimized') === 'true';
-  
+
+  // Never exceed the viewport: on narrow/small windows the old fixed
+  // 450x620 box overflowed the page. Clamp to the window, with margin.
+  const getExpandedSize = () => ({
+    width: Math.min(450, window.innerWidth - 20) + 'px',
+    height: Math.min(620, window.innerHeight - 40) + 'px'
+  });
+
   const applyState = () => {
     if (isMinimized) {
       widget.style.height = '42px';
-      widget.style.width = '280px';
+      widget.style.width = Math.min(280, window.innerWidth - 20) + 'px';
       widget.style.bottom = '0px';
       widget.style.borderRadius = '12px 12px 0 0';
       minBtn.innerText = '▲ Open';
     } else {
-      widget.style.height = '620px';
-      widget.style.width = '450px';
+      const size = getExpandedSize();
+      widget.style.height = size.height;
+      widget.style.width = size.width;
       widget.style.bottom = '20px';
       widget.style.borderRadius = '12px';
       minBtn.innerText = '▼ Minimize';
     }
   };
-  
+
   applyState();
+  window.addEventListener('resize', applyState);
 
   header.addEventListener('click', () => {
     isMinimized = !isMinimized;
